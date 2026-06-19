@@ -67,7 +67,7 @@ This script parses the translated pages, formats the book structure, and package
 You can run the entire pipeline end-to-end starting with a PDF file by invoking `book_translator.py`:
 
 ```bash
-python book_translator.py --pdf devoutlife.pdf --src-dir pages --trans-dir pages_norwegian --output Devout_Life_Norwegian.epub --title "Introduksjon til det fromme livet" --author "St. Frans av Salg" --toc-start 2 --toc-end 6
+python book_translator.py --pdf mybook.pdf --src-dir pages --trans-dir pages_norwegian --output My_Book.epub --title "My Book" --author "Myself" --toc-start 2 --toc-end 6
 ```
 
 ### Flow Control Flags:
