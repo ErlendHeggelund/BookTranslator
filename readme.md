@@ -1,14 +1,34 @@
-# Book Translation & EPUB Packaging Pipeline Walkthrough
+# Book Translation & EPUB Compiler Pipeline
 
-This document outlines the refactored, general-purpose pipeline that extracts, translates, and packages books from a PDF into a structured EPUB with pop-up footnotes and an interactive Table of Contents.
+This pipeline automates extracting text from a PDF, translating page files, and compiling them into a professionally structured EPUB with interactive table of contents, running footers cleaning, and pop-up footnotes support (EPUB 3).
 
 The architecture is fully modular, allowing you to run individual steps manually using helper scripts, or execute the entire process end-to-end with the orchestrator script.
 
 ---
 
-## 1. Modular Script Architecture
+## 📋 Prerequisites
 
-The project directory has been restructured to separate the concerns of each pipeline phase into clean, CLI-capable Python modules:
+Before running the scripts, make sure you have the required Python libraries installed:
+
+```bash
+pip install pymupdf deep-translator EbookLib
+```
+
+---
+
+## 📂 File Structure
+
+- **`book_translator.py`**: The main orchestrator script that ties all steps together.
+- **`extract_text_from_pdf.py`**: Helper script to extract PDF text page-by-page.
+- **`translate_pages.py`**: Helper script to translate pages using `deep-translator` with paragraph chunking and rate-limit backoff.
+- **`build_epub.py`**: Helper script to compile text pages into a structured EPUB.
+- **`README.md`**: Consolidated project overview, technical walkthrough, and usage guide (this file).
+
+---
+
+## ⚙️ Modular Pipeline Architecture
+
+The pipeline consists of three core phases that can be run together via the orchestrator or run individually:
 
 ```mermaid
 graph TD
@@ -22,59 +42,58 @@ graph TD
     E -.->|Imports & Runs| D
 ```
 
-### 1.1. Text Extraction
-- **File**: [extract_text_from_pdf.py](file:///c:/Users/ErlendHeggelund/Downloads/Books/Devout_Life/extract_text_from_pdf.py)
-- **Purpose**: Opens the source PDF using PyMuPDF and extracts text page-by-page into separate `.txt` files under a source directory.
-- **Standalone CLI Usage**:
-  ```bash
-  python extract_text_from_pdf.py /path/to/book.pdf -o folder_name
-  ```
+### 1. Text Extraction (`extract_text_from_pdf.py`)
+- **Action**: Opens the source PDF using PyMuPDF and extracts text page-by-page.
+- **Output**: Generates one `.txt` file per page (e.g. `page_1.txt`, `page_2.txt`) in a specified directory.
+- **Robustness**: Safely catches missing dependency errors and guides you on installation.
 
-### 1.2. Page Translation
-- **File**: [translate_pages.py](file:///c:/Users/ErlendHeggelund/Downloads/Books/Devout_Life/translate_pages.py)
-- **Purpose**: Automatically translates extracted page files using `deep-translator`. Handles long files by splitting paragraphs exceeding 4,000 characters and implements exponential backoff to handle rate limits.
-- **Standalone CLI Usage**:
-  ```bash
-  python translate_pages.py --src-dir folder_name --dest-dir translated_folder --target-lang no
-  ```
+### 2. Page Translation (`translate_pages.py`)
+- **Action**: Automates the translation of extracted page files using `deep-translator`.
+- **Length Chunking**: Google Translate limits requests to 5000 characters. The script safely splits pages exceeding 4000 characters by paragraph (falling back to line splits if paragraphs are exceptionally long).
+- **API Resilience**: Implements exponential backoff retry logic (up to 5 attempts) to handle API rate limiting and network hiccups gracefully.
 
-### 1.3. EPUB Compilation
-- **File**: [build_epub.py](file:///c:/Users/ErlendHeggelund/Downloads/Books/Devout_Life/build_epub.py)
-- **Purpose**: Parses translated text pages, cleans footers/page numbers dynamically based on title/author metadata, parses interactive XHTML Tables of Contents and Indexes, extracts footnotes sequentially, and compiles everything into a standards-compliant EPUB book using `EbookLib`.
-- **Standalone CLI Usage**:
-  ```bash
-  python build_epub.py --src-dir translated_folder --output book.epub --title "My Book" --author "Author Name" --toc-start 2 --toc-end 6
-  ```
+### 3. EPUB Compilation (`build_epub.py`)
+This script parses the translated pages, formats the book structure, and packages it using `EbookLib`.
+
+- **Footer & Running Header Cleaning**: Dynamically filters out common book running footers/headers (e.g. page numbers, author, or book titles) to prevent them from interrupting body text. Custom filters are compiled at runtime using the `--title` and `--author` CLI values.
+- **Chapter Detection & Bound Splits**: Auto-detects chapter markers (e.g., matching `DEL ` / `PART ` or `KAPITTEL ` / `CHAPTER ` or custom terms) and segments document files accordingly. Text page numbers appearing inline are stripped.
+- **Sequential Footnote Resolution**: Extracts footnotes sequentially from the bottom of each page. anchor tags (`<sup><a epub:type="noteref">`) are dynamically linked to their footnotes, which are built as modern EPUB 3 `<aside epub:type="footnote">` popup boxes. A strictly increasing range check prevents text page numbers from being misidentified as footnote definitions.
+- **Duplicate Prevention**: If multiple preface or index pages are detected (e.g. "Forord" matched multiple times), unique filename and ID counters are automatically appended (e.g., `preface2.xhtml`) to prevent duplicate entry names inside the EPUB zip container.
 
 ---
 
-## 2. Reusable Orchestrator
+## 🚀 Orchestrator Usage
 
-The main coordinator script is [book_translator.py](file:///c:/Users/ErlendHeggelund/Downloads/Books/Devout_Life/book_translator.py). It has been refactored to remove all code duplication, acting as a clean wrapper that imports the three modular scripts.
+You can run the entire pipeline end-to-end starting with a PDF file by invoking `book_translator.py`:
 
-### 2.1. Key Orchestrator Features
-- **Dynamic Module Import**: Automatically adds its own directory to `sys.path` to import local helper scripts, meaning you can run it from any working directory.
-- **Dependency Checks**: Inspects the environment and raises friendly, user-facing error messages if required modules (`pymupdf`, `deep-translator`, `EbookLib`) or helper files are missing.
-- **TOC & Index Handling**: Dynamically parses TOC bounds and Index pages.
-- **Preflight Fixes**:
-  - Automatically appends numerical counters to multiple preface/index pages (e.g., `preface2.xhtml`) to prevent duplicate entry names inside the EPUB zip package.
-  - Dynamically builds custom running footer/header filters using regex derived from the input `--title` and `--author` CLI values.
-
-### 2.2. End-to-End CLI Command Example
-To run the entire pipeline end-to-end starting with a PDF:
 ```bash
 python book_translator.py --pdf devoutlife.pdf --src-dir pages --trans-dir pages_norwegian --output Devout_Life_Norwegian.epub --title "Introduksjon til det fromme livet" --author "St. Frans av Salg" --toc-start 2 --toc-end 6
 ```
 
-### 2.3. Flow Control Flags
-The orchestrator supports several flags to run partial stages of the pipeline:
-- `--skip-pdf`: Skips extraction and begins directly with translation.
-- `--skip-translation`: Skips translation and begins directly with EPUB compilation (extremely useful if you want to manually edit/review translated pages before compiling).
-- `--skip-epub`: Skips EPUB compilation.
+### Flow Control Flags:
+- `--skip-pdf`: Skips text extraction from PDF (uses existing `.txt` files in `--src-dir`).
+- `--skip-translation`: Skips translating text pages (uses existing files in `--trans-dir`). This is extremely useful if you want to manually edit or review translated pages before building the final EPUB.
+- `--skip-epub`: Skips EPUB packaging.
 
 ---
 
-## 3. Environment & Validation Status
-- **Verification Result**: Ran the refactored orchestrator script on the `pages_norwegian` directory with `--skip-translation` to package the EPUB book without warnings or errors.
-- **Cleanup**: Removed the temporary footnote analysis files (`scratch_summary.txt`) to keep your project folder clean.
-- **Retention**: Retained all three modular helper scripts alongside the orchestrator in the project directory.
+## 🛠️ Standalone Helper Script Usage
+
+Each step can also be run independently for modular control:
+
+### Step 1: PDF Extraction
+```bash
+python extract_text_from_pdf.py devoutlife.pdf -o pages
+```
+
+### Step 2: Translation
+```bash
+python translate_pages.py --src-dir pages --dest-dir pages_norwegian --target-lang no
+```
+
+### Step 3: EPUB Packaging
+```bash
+python build_epub.py --src-dir pages_norwegian --output book.epub --title "My Book Title" --author "Author Name" --toc-start 2 --toc-end 6
+```
+
+*Note: You can pass `--no-footnotes`, `--no-toc`, or `--no-index` flags to `build_epub.py` (or the orchestrator) if your target book does not contain these elements.*
